@@ -10,6 +10,7 @@ if (!isset($_SESSION['user_id'])) {
 
 // Traer información del usuario
 $stmt = $pdo->prepare("SELECT nombre, apellido, role_id FROM usuarios WHERE id = :id");
+
 $stmt->execute(['id' => $_SESSION['user_id']]);
 $user = $stmt->fetch();
 
