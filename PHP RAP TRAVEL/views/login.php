@@ -8,23 +8,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $password = $_POST['password'];
 
     // Buscar usuario en la base de datos
-    $stmt = $pdo->prepare("SELECT * FROM users WHERE email = :email");
+    $stmt = $pdo->prepare("SELECT * FROM usuarios WHERE correo = :email LIMIT 1");
     $stmt->execute(['email' => $email]);
-    $user = $stmt->fetch();
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if ($user && password_verify($password, $user['password_hash'])) {
+    if ($user && password_verify($password, $user['contrasena_hash'])) {
         // Iniciar sesión si las credenciales son correctas
         $_SESSION['user_id'] = $user['id'];
-        $_SESSION['role_id'] = $user['role_id'];
-        $_SESSION['email'] = $user['email'];
+        $_SESSION['role_id'] = $user['rol_id'];
+        $_SESSION['email']   = $user['correo'];
+
         header('Location: index.php'); // Redirige al panel principal
         exit;
     } else {
-        $error = "Credenciales incorrectas.";
+        $error = "❌ Credenciales incorrectas.";
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -32,6 +32,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iniciar Sesión | Rap Travel Perú</title>
     
+    <!-- Fuentes y estilos externos -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700&display=swap" rel="stylesheet">
@@ -125,7 +126,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             <h2>Bienvenido de Nuevo</h2>
             <p>Inicia sesión para continuar tu aventura</p>
             <?php if (isset($error)): ?>
-                <p style="color: red;"><?php echo $error; ?></p>
+                <p style="color: red; font-weight: bold;"><?php echo $error; ?></p>
             <?php endif; ?>
             <form method="POST" action="login.php">
                 <div class="input-group">
@@ -138,7 +139,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 </div>
                 <button type="submit" class="submit-btn">Iniciar sesión</button>
                 <div class="extra-options">
-                    <a href="#">Crear cuenta</a>
+                    <a href="register.php">Crear cuenta</a>
                     <a href="#">¿Olvidaste tu contraseña?</a>
                 </div>
             </form>

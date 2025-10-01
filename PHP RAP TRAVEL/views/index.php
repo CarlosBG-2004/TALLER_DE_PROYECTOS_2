@@ -9,16 +9,23 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 // Traer información del usuario
-$stmt = $pdo->prepare("SELECT nombre, apellido, role_id FROM users WHERE id = :id");
+$stmt = $pdo->prepare("SELECT nombre, apellido, role_id FROM usuarios WHERE id = :id");
 $stmt->execute(['id' => $_SESSION['user_id']]);
 $user = $stmt->fetch();
 
 // Consultas básicas para mostrar en el dashboard
-$total_users = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
-$total_clients = $pdo->query("SELECT COUNT(*) FROM clients")->fetchColumn();
-$total_sales = $pdo->query("SELECT COUNT(*) FROM files")->fetchColumn();
-$total_suppliers = $pdo->query("SELECT COUNT(*) FROM suppliers")->fetchColumn();
-$total_tasks = $pdo->query("SELECT COUNT(*) FROM marketing_tasks WHERE estado != 'completada'")->fetchColumn();
+$total_users = $pdo->query("SELECT COUNT(*) FROM usuarios")->fetchColumn();
+$total_clients = $pdo->query("SELECT COUNT(*) FROM clientes")->fetchColumn();
+$total_sales = $pdo->query("SELECT COUNT(*) FROM archivos")->fetchColumn();
+$total_suppliers = $pdo->query("SELECT COUNT(*) FROM proveedores")->fetchColumn();
+$total_tasks = $pdo->query("SELECT COUNT(*) FROM tareas_marketing WHERE estado != 'completada'")->fetchColumn();
+
+// Si el usuario es gerente (role_id = 1), mostrar estadísticas adicionales
+if ($user['role_id'] == 1) {
+    // Consultas especiales para el gerente
+    $total_revenue = $pdo->query("SELECT SUM(monto_total) FROM archivos")->fetchColumn(); // Ingresos totales por ventas
+    $total_pending_payments = $pdo->query("SELECT SUM(monto_total - monto_depositado) FROM archivos WHERE monto_total > monto_depositado")->fetchColumn(); // Pagos pendientes
+}
 ?>
 
 <!DOCTYPE html>
@@ -32,7 +39,7 @@ $total_tasks = $pdo->query("SELECT COUNT(*) FROM marketing_tasks WHERE estado !=
 <body>
     <header>
         <h1>Panel Principal</h1>
-        <p>Bienvenido, <?php echo $user['nombre'] . " " . $user['apellido']; ?> | Rol: <?php echo $user['role_id']; ?></p>
+        <p>Bienvenido, <?php echo $user['nombre'] . " " . $user['apellido']; ?> | Rol: <?php echo ($user['role_id'] == 1) ? 'Gerente' : 'Usuario'; ?></p>
         <nav>
             <ul>
                 <li><a href="ventas.php">Ventas</a></li>
@@ -68,6 +75,18 @@ $total_tasks = $pdo->query("SELECT COUNT(*) FROM marketing_tasks WHERE estado !=
                 <h3>Tareas Pendientes de Marketing</h3>
                 <p><?php echo $total_tasks; ?></p>
             </div>
+
+            <!-- Solo visible para el gerente -->
+            <?php if ($user['role_id'] == 1): ?>
+                <div class="card">
+                    <h3>Ingresos Totales</h3>
+                    <p><?php echo '$' . number_format($total_revenue, 2); ?></p>
+                </div>
+                <div class="card">
+                    <h3>Pagos Pendientes</h3>
+                    <p><?php echo '$' . number_format($total_pending_payments, 2); ?></p>
+                </div>
+            <?php endif; ?>
         </section>
     </main>
 
