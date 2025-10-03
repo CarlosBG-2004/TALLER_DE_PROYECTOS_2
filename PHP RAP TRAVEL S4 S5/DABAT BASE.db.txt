@@ -1,0 +1,230 @@
+-- --------------------------------------------------
+-- Base de Datos
+-- --------------------------------------------------
+CREATE DATABASE IF NOT EXISTS proyectos2 CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE proyectos2;
+
+-- --------------------------------------------------
+-- 1. Tabla de Roles
+-- --------------------------------------------------
+CREATE TABLE roles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(50) NOT NULL UNIQUE,
+    descripcion TEXT
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 2. Tabla de Usuarios
+-- --------------------------------------------------
+CREATE TABLE usuarios (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    apellido VARCHAR(100) NOT NULL,
+    correo VARCHAR(255) NOT NULL UNIQUE,
+    contrasena_hash VARCHAR(255) NOT NULL,
+    rol_id INT NOT NULL,
+    activo TINYINT(1) DEFAULT 1,
+    secreto_doble_factor VARCHAR(255) NULL,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (rol_id) REFERENCES roles(id)
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 3. Tabla de Permisos
+-- --------------------------------------------------
+CREATE TABLE permisos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    descripcion TEXT
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 4. Tabla de Relación Roles-Permisos
+-- --------------------------------------------------
+CREATE TABLE rol_permisos (
+    rol_id INT NOT NULL,
+    permiso_id INT NOT NULL,
+    PRIMARY KEY (rol_id, permiso_id),
+    FOREIGN KEY (rol_id) REFERENCES roles(id),
+    FOREIGN KEY (permiso_id) REFERENCES permisos(id)
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 5. Tabla de Clientes
+-- --------------------------------------------------
+CREATE TABLE clientes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    apellido VARCHAR(100) NOT NULL,
+    correo VARCHAR(255) NOT NULL UNIQUE,
+    telefono VARCHAR(50) NOT NULL,
+    pais VARCHAR(50),
+    fecha_nacimiento DATE,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 6. Tabla de Archivos/Registros de Ventas
+-- --------------------------------------------------
+CREATE TABLE archivos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    responsable_id INT NOT NULL,
+    cliente_id INT NOT NULL,
+    programa VARCHAR(255) NOT NULL,
+    tour VARCHAR(255) NOT NULL,
+    duracion INT NOT NULL,
+    fecha_venta DATE NOT NULL,
+    fecha_tour_inicio DATE NOT NULL,
+    fecha_tour_fin DATE NOT NULL,
+    moneda VARCHAR(50) NOT NULL,
+    monto_persona DECIMAL(10,2) NOT NULL,
+    monto_total DECIMAL(10,2) NOT NULL,
+    monto_depositado DECIMAL(10,2) NOT NULL,
+    agencia VARCHAR(255) NOT NULL,
+    medio_pago VARCHAR(50),
+    origen_cliente VARCHAR(100),
+    notas TEXT,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (responsable_id) REFERENCES usuarios(id),
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 7. Tabla de Pagos
+-- --------------------------------------------------
+CREATE TABLE pagos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    archivo_id INT NOT NULL,
+    fecha DATE NOT NULL,
+    monto DECIMAL(10,2) NOT NULL,
+    moneda VARCHAR(50) NOT NULL,
+    metodo VARCHAR(50) NOT NULL,
+    comprobante_url VARCHAR(255),
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (archivo_id) REFERENCES archivos(id)
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 8. Tabla de Proveedores
+-- --------------------------------------------------
+CREATE TABLE proveedores (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(255) NOT NULL,
+    ruc VARCHAR(20),
+    contacto VARCHAR(100),
+    telefono VARCHAR(50),
+    correo VARCHAR(100),
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 9. Tabla de Servicios Operacionales
+-- --------------------------------------------------
+CREATE TABLE servicios_operaciones (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    archivo_id INT NOT NULL,
+    tipo ENUM('tren','hotel','entrada','transporte') NOT NULL,
+    proveedor_id INT NOT NULL,
+    costo_acordado DECIMAL(10,2) NOT NULL,
+    pagado DECIMAL(10,2) DEFAULT 0,
+    saldo DECIMAL(10,2) DEFAULT 0,
+    reservado TINYINT(1) DEFAULT 0,
+    voucher_url VARCHAR(255),
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (archivo_id) REFERENCES archivos(id),
+    FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 10. Tabla de Tareas de Marketing
+-- --------------------------------------------------
+CREATE TABLE tareas_marketing (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT NOT NULL,
+    titulo VARCHAR(255) NOT NULL,
+    descripcion TEXT,
+    fecha DATE NOT NULL,
+    estado ENUM('pendiente','en progreso','completada') DEFAULT 'pendiente',
+    tipo ENUM('post','video','email') NOT NULL,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 11. Tabla de Auditoría
+-- --------------------------------------------------
+CREATE TABLE auditoria (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT NOT NULL,
+    tabla VARCHAR(100),
+    registro_id INT NOT NULL,
+    accion ENUM('crear','editar','eliminar') NOT NULL,
+    valores_antiguos TEXT,
+    valores_nuevos TEXT,
+    ip VARCHAR(50),
+    user_agent VARCHAR(255),
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 12. Tabla de Calendario
+-- --------------------------------------------------
+CREATE TABLE calendario (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    modulo ENUM('ventas','operaciones','marketing','gerencia','contabilidad') NOT NULL,
+    titulo VARCHAR(255) NOT NULL,
+    descripcion TEXT,
+    inicio DATETIME NOT NULL,
+    fin DATETIME NOT NULL,
+    archivo_id INT NULL,
+    servicio_id INT NULL,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (archivo_id) REFERENCES archivos(id),
+    FOREIGN KEY (servicio_id) REFERENCES servicios_operaciones(id)
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 13. Tabla de Plantillas
+-- --------------------------------------------------
+CREATE TABLE plantillas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    canal ENUM('whatsapp','email','sms') NOT NULL,
+    nombre VARCHAR(255) NOT NULL,
+    contenido TEXT NOT NULL,
+    variables_json JSON
+) ENGINE=InnoDB;
+
+-- --------------------------------------------------
+-- 14. Tabla de Campañas
+-- --------------------------------------------------
+CREATE TABLE campanas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    canal ENUM('whatsapp','email','sms') NOT NULL,
+    segmento_json JSON NOT NULL,
+    plantilla_id INT NOT NULL,
+    estado ENUM('pendiente','enviado','fallido') DEFAULT 'pendiente',
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (plantilla_id) REFERENCES plantillas(id)
+) ENGINE=InnoDB;
+-- --------------------------------------------------
+-- 15. Tabla de Paquetes Turísticos
+-- --------------------------------------------------
+CREATE TABLE IF NOT EXISTS paquetes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(255) NOT NULL,
+    descripcion TEXT,
+    precio DECIMAL(10,2) NOT NULL,
+    stock INT NOT NULL DEFAULT 0,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+
+-- --------------------------------------------------
+ALTER TABLE archivos
+ADD COLUMN tipo_compra ENUM('individual','grupal') NOT NULL DEFAULT 'individual',
+ADD COLUMN numero_personas INT DEFAULT 1;
