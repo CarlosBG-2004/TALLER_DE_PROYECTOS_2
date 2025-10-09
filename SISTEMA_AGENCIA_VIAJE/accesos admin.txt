@@ -1,0 +1,2 @@
+correo: admin@erp.local
+contra:admin2025

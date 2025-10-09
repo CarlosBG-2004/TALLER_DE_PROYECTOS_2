@@ -3,7 +3,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>ERP TURISMO | Iniciar sesión</title>
+  <title>SISTEMA TURISTICO | Iniciar sesión</title>
   <meta content="width=device-width, initial-scale=1, maximum-scale=1" name="viewport">
 
   <!-- CSS AdminLTE 2 -->
@@ -15,7 +15,7 @@
 <body class="hold-transition login-page">
 <div class="login-box">
   <div class="login-logo">
-    <a href="#"><b>ERP</b> TURISMO</a>
+    <a href="#"><b>AGENCIAS</b> DE VIAJE</a>
   </div>
   <div class="login-box-body">
     <p class="login-box-msg">Inicia sesión para continuar</p>
