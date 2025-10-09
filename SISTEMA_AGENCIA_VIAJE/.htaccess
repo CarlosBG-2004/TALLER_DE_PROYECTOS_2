@@ -1,0 +1,9 @@
+# BEGIN Custom Rewrite
+RewriteEngine On
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Usa Pages (con S) para que coincida con tu PHP
+RewriteRule ^([-a-zA-Z0-9/]+)$ index.php?Pages=$1 [L,QSA]
+# END Custom Rewrite
