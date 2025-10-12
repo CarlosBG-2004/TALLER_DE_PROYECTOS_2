@@ -47,7 +47,7 @@
 
                     // nuevas
                     'Dashboard',
-                    'Clientes','Agencias','Proveedores',
+                    'Clientes','Agencias','Proveedores', 'DashboardContable',
                     'Expedientes','Pagos',
                     'ServiciosOperaciones','Programacion',
                     'InventarioBienes','InventarioMovimientos',

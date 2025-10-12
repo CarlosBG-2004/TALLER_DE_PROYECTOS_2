@@ -116,6 +116,9 @@ if (!empty($_SESSION['user']['nombre'])) {
           <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
         </a>
         <ul class="treeview-menu">
+          <?php if (isSuper() || can('contabilidad.ver') || can('dashboard.contable')): ?>
+          <li><a href="DashboardContable"><i class="fa fa-dashboard"></i> Dashboard Contable</a></li>
+          <?php endif; ?>
           <?php if (isSuper() || can('contabilidad.ver') || can('contabilidad.movimientos')): ?>
           <li><a href="ContabilidadMovimientos"><i class="fa fa-list"></i> Movimientos</a></li>
           <?php endif; ?>
