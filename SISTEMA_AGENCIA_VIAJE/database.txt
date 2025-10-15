@@ -450,3 +450,26 @@ INSERT IGNORE INTO roles (nombre, descripcion, area_id) VALUES
 ('Contabilidad','Acceso a contabilidad', (SELECT id FROM areas WHERE nombre='contabilidad')),
 ('Marketing','Acceso a marketing', (SELECT id FROM areas WHERE nombre='marketing')),
 ('Postventa','Acceso a postventa', (SELECT id FROM areas WHERE nombre='postventa'));
+
+ALTER TABLE contabilidad_movimientos
+  ADD COLUMN IF NOT EXISTS comprobante_url VARCHAR(255) NULL,
+  ADD COLUMN IF NOT EXISTS actualizado_en TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  ADD COLUMN IF NOT EXISTS metodo VARCHAR(50) NULL;
+ALTER TABLE contabilidad_categorias
+  ADD COLUMN IF NOT EXISTS tipo ENUM('ingreso','gasto') NOT NULL DEFAULT 'gasto' AFTER nombre,
+  ADD COLUMN IF NOT EXISTS descripcion TEXT NULL AFTER tipo,
+  ADD COLUMN IF NOT EXISTS activo TINYINT(1) NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS creado_en TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  ADD COLUMN IF NOT EXISTS actualizado_en TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+
+-- Ajusta la tabla de cajas
+ALTER TABLE caja_chica
+  ADD COLUMN IF NOT EXISTS moneda ENUM('PEN','USD','EUR') NOT NULL DEFAULT 'PEN' AFTER responsable_id,
+  ADD COLUMN IF NOT EXISTS saldo_inicial DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER moneda,
+  ADD COLUMN IF NOT EXISTS activo TINYINT(1) NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS creado_en TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  ADD COLUMN IF NOT EXISTS actualizado_en TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+
+-- (Opcional pero recomendable) Asegura que movimientos tenga la moneda
+ALTER TABLE caja_chica_movimientos
+  ADD COLUMN IF NOT EXISTS moneda ENUM('PEN','USD','EUR') NOT NULL DEFAULT 'PEN' AFTER monto;
