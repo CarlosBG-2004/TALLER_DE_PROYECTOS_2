@@ -1,43 +1,36 @@
 <?php
+// --- SIN espacios antes de <?php --- //
 if (session_status() !== PHP_SESSION_ACTIVE) { session_start(); }
 require_once "Config/Database.php";
 
 // ---- Autorización básica: Admin o Gerencia ----
 $rol = $_SESSION['user']['rol'] ?? '';
 if (!in_array($rol, ['Admin','Gerencia'], true)) {
-?>
-<section class="content-header">
-  <h1>Usuarios <small>Acceso restringido</small></h1>
-</section>
-<section class="content">
-  <div class="callout callout-danger">
-    <h4>No autorizado</h4>
-    <p>Esta sección es exclusiva para <strong>Gerencia</strong> y <strong>Administradores</strong>.</p>
-  </div>
-</section>
-<?php
+  ?>
+  <section class="content-header">
+    <h1>Usuarios <small>Acceso restringido</small></h1>
+  </section>
+  <section class="content">
+    <div class="callout callout-danger">
+      <h4>No autorizado</h4>
+      <p>Esta sección es exclusiva para <strong>Gerencia</strong> y <strong>Administradores</strong>.</p>
+    </div>
+  </section>
+  <?php
   return;
 }
 
 // ---------- Utilidades ----------
-function flash($key='flash') {
-  if (!empty($_SESSION[$key])) { echo $_SESSION[$key]; unset($_SESSION[$key]); }
-}
-function set_flash($type, $msg, $key='flash') {
-  $_SESSION[$key] = '<div class="alert alert-'.$type.'">'.$msg.'</div>';
-}
-function csrf_get_token() {
-  if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
-  return $_SESSION['csrf'];
-}
-function csrf_validate($token) {
-  return isset($_SESSION['csrf']) && hash_equals($_SESSION['csrf'], $token ?? '');
-}
+function redirect($url){ header("Location: $url"); exit; }
+function flash($key='flash'){ if(!empty($_SESSION[$key])){ echo $_SESSION[$key]; unset($_SESSION[$key]); } }
+function set_flash($type,$msg,$key='flash'){ $_SESSION[$key] = '<div class="alert alert-'.$type.'">'.$msg.'</div>'; }
+function csrf_get_token(){ if(empty($_SESSION['csrf'])) $_SESSION['csrf']=bin2hex(random_bytes(16)); return $_SESSION['csrf']; }
+function csrf_validate($t){ return isset($_SESSION['csrf']) && hash_equals($_SESSION['csrf'],$t ?? ''); }
 
 $pdo = Database::getConnection();
 
 // ---------- Cargar Áreas ----------
-$areas  = $pdo->query("SELECT id, nombre FROM areas ORDER BY nombre ASC")->fetchAll();
+$areas = $pdo->query("SELECT id, nombre FROM areas ORDER BY nombre ASC")->fetchAll();
 
 // ---------- Acciones (create/update/delete/toggle) ----------
 try {
@@ -45,29 +38,26 @@ try {
   if (($_POST['action'] ?? '') === 'create') {
     if (!csrf_validate($_POST['csrf'] ?? '')) throw new Exception('CSRF inválido.');
 
-    $nombre    = trim($_POST['nombre'] ?? '');
-    $apellido  = trim($_POST['apellido'] ?? '');
-    $correo    = trim($_POST['correo'] ?? '');
-    $pass      = $_POST['contrasena'] ?? '';
-    $area_id   = (int)($_POST['area_id'] ?? 0);
-    $activo    = isset($_POST['activo']) ? 1 : 0;
+    $nombre   = trim($_POST['nombre'] ?? '');
+    $apellido = trim($_POST['apellido'] ?? '');
+    $correo   = trim($_POST['correo'] ?? '');
+    $pass     = $_POST['contrasena'] ?? '';
+    $area_id  = (int)($_POST['area_id'] ?? 0);
+    $activo   = isset($_POST['activo']) ? 1 : 0;
 
-    if ($nombre === '' || $apellido === '' || $correo === '' || $pass === '' || !$area_id) {
+    if ($nombre===''||$apellido===''||$correo===''||$pass===''||!$area_id) {
       throw new Exception('Completa los campos obligatorios (*).');
     }
 
-    // Rol NO se asigna aquí. Para cumplir el NOT NULL de rol_id:
-    // 1) intenta tomar un rol cuyo area_id coincida
+    // Rol NO se asigna aquí. Para cumplir NOT NULL de rol_id:
     $rol_id = null;
     $st = $pdo->prepare("SELECT id FROM roles WHERE area_id = ? ORDER BY id LIMIT 1");
     $st->execute([$area_id]);
     $rol_id = $st->fetchColumn();
 
-    // 2) si no existe, usa un rol neutral (ej. Postventa), si existe
     if (!$rol_id) {
       $rol_id = $pdo->query("SELECT id FROM roles WHERE nombre='Postventa' LIMIT 1")->fetchColumn();
     }
-    // 3) fallback final: primer rol disponible (evitar error por NOT NULL)
     if (!$rol_id) {
       $rol_id = $pdo->query("SELECT id FROM roles ORDER BY id LIMIT 1")->fetchColumn();
     }
@@ -77,39 +67,39 @@ try {
                          VALUES (?,?,?,?,?,?,?)");
     $st->execute([$nombre, $apellido, $correo, $hash, $rol_id, $area_id, $activo]);
 
-    set_flash('success', 'Colaborador creado correctamente. <br><small>Nota: el <b>Rol</b> se asigna desde la pantalla <b>Roles</b>.</small>');
-    header("Location: Users"); exit;
+    set_flash('success','Colaborador creado correctamente. <br><small>Nota: el <b>Rol</b> se asigna desde la pantalla <b>Roles</b>.</small>');
+    redirect('Users');
   }
 
-  // Actualizar (NO tocar rol_id aquí)
+  // Actualizar (no tocar rol_id)
   if (($_POST['action'] ?? '') === 'update') {
     if (!csrf_validate($_POST['csrf'] ?? '')) throw new Exception('CSRF inválido.');
 
-    $id        = (int)($_POST['id'] ?? 0);
-    $nombre    = trim($_POST['nombre'] ?? '');
-    $apellido  = trim($_POST['apellido'] ?? '');
-    $correo    = trim($_POST['correo'] ?? '');
-    $pass      = $_POST['contrasena'] ?? '';
-    $area_id   = (int)($_POST['area_id'] ?? 0);
-    $activo    = isset($_POST['activo']) ? 1 : 0;
+    $id       = (int)($_POST['id'] ?? 0);
+    $nombre   = trim($_POST['nombre'] ?? '');
+    $apellido = trim($_POST['apellido'] ?? '');
+    $correo   = trim($_POST['correo'] ?? '');
+    $pass     = $_POST['contrasena'] ?? '';
+    $area_id  = (int)($_POST['area_id'] ?? 0);
+    $activo   = isset($_POST['activo']) ? 1 : 0;
 
-    if (!$id || $nombre === '' || $apellido === '' || $correo === '' || !$area_id) {
+    if (!$id || $nombre===''||$apellido===''||$correo===''||!$area_id) {
       throw new Exception('Completa los campos obligatorios (*).');
     }
 
     if ($pass !== '') {
       $hash = password_hash($pass, PASSWORD_BCRYPT);
       $sql  = "UPDATE usuarios SET nombre=?, apellido=?, correo=?, contrasena_hash=?, area_id=?, activo=?, actualizado_en=NOW() WHERE id=?";
-      $args = [$nombre, $apellido, $correo, $hash, $area_id, $activo, $id];
+      $args = [$nombre,$apellido,$correo,$hash,$area_id,$activo,$id];
     } else {
       $sql  = "UPDATE usuarios SET nombre=?, apellido=?, correo=?, area_id=?, activo=?, actualizado_en=NOW() WHERE id=?";
-      $args = [$nombre, $apellido, $correo, $area_id, $activo, $id];
+      $args = [$nombre,$apellido,$correo,$area_id,$activo,$id];
     }
     $st = $pdo->prepare($sql);
     $st->execute($args);
 
-    set_flash('success', 'Colaborador actualizado correctamente. <br><small>Nota: el <b>Rol</b> se mantiene sin cambios.</small>');
-    header("Location: Users"); exit;
+    set_flash('success','Colaborador actualizado correctamente. <br><small>Nota: el <b>Rol</b> se mantiene sin cambios.</small>');
+    redirect('Users');
   }
 
   // Inactivar (borrado lógico)
@@ -121,8 +111,8 @@ try {
     $st = $pdo->prepare("UPDATE usuarios SET activo=0, actualizado_en=NOW() WHERE id=?");
     $st->execute([$id]);
 
-    set_flash('success', 'Colaborador inactivado.');
-    header("Location: Users"); exit;
+    set_flash('success','Colaborador inactivado.');
+    redirect('Users');
   }
 
   // Toggle activo/inactivo
@@ -130,18 +120,17 @@ try {
     $id = (int)$_GET['toggle'];
     $st = $pdo->prepare("UPDATE usuarios SET activo = IF(activo=1,0,1), actualizado_en=NOW() WHERE id=?");
     $st->execute([$id]);
-    set_flash('info', 'Estado actualizado.');
-    header("Location: Users"); exit;
+    set_flash('info','Estado actualizado.');
+    redirect('Users');
   }
 
 } catch (Throwable $e) {
-  // Duplicado de correo (unique)
-  if ($e instanceof PDOException && $e->getCode() === '23000') {
-    set_flash('danger', 'El correo ya existe. Prueba con otro.');
+  if ($e instanceof PDOException && $e->getCode()==='23000') {
+    set_flash('danger','El correo ya existe. Prueba con otro.');
   } else {
-    set_flash('danger', 'Error: '.$e->getMessage());
+    set_flash('danger','Error: '.$e->getMessage());
   }
-  header("Location: Users"); exit;
+  redirect('Users');
 }
 
 // ---------- Cargar usuario a editar (si viene ?edit=ID) ----------
@@ -154,21 +143,19 @@ if (!empty($_GET['edit'])) {
 }
 
 // ---------- Listado con filtros ----------
-$q        = trim($_GET['q'] ?? '');
-$areaF    = (int)($_GET['area'] ?? 0);
-$showAll  = isset($_GET['all']) ? 1 : 0;
+$q       = trim($_GET['q'] ?? '');
+$areaF   = (int)($_GET['area'] ?? 0);
+$showAll = isset($_GET['all']) ? 1 : 0;
 
 $params = [];
 $where  = [];
-
 if (!$showAll) { $where[] = "u.activo=1"; }
 if ($q !== '') {
   $where[] = "(u.nombre LIKE ? OR u.apellido LIKE ? OR u.correo LIKE ?)";
   $params[] = "%$q%"; $params[] = "%$q%"; $params[] = "%$q%";
 }
 if ($areaF) {
-  $where[] = "u.area_id = ?";
-  $params[] = $areaF;
+  $where[] = "u.area_id = ?"; $params[] = $areaF;
 }
 
 $sqlList = "
@@ -179,12 +166,10 @@ $sqlList = "
 ";
 if ($where) $sqlList .= " WHERE ".implode(" AND ", $where);
 $sqlList .= " ORDER BY u.id DESC";
-
 $st = $pdo->prepare($sqlList);
 $st->execute($params);
 $users = $st->fetchAll();
 
-// CSRF
 $csrf = csrf_get_token();
 ?>
 
@@ -201,7 +186,7 @@ $csrf = csrf_get_token();
   <?php flash(); ?>
 
   <div class="row">
-    <!-- Card: Crear / Editar -->
+    <!-- Formulario Crear/Editar -->
     <div class="col-md-4">
       <div class="box box-primary box-solid">
         <div class="box-header with-border">
@@ -299,7 +284,7 @@ $csrf = csrf_get_token();
       <?php endif; ?>
     </div>
 
-    <!-- Card: Listado y filtros -->
+    <!-- Listado -->
     <div class="col-md-8">
       <div class="box box-default">
         <div class="box-header with-border">
@@ -316,7 +301,7 @@ $csrf = csrf_get_token();
           <form class="form-inline" method="get" action="Users" style="margin-bottom:10px;">
             <div class="form-group">
               <label class="sr-only">Buscar</label>
-              <input type="hidden" name="Pages" value="Users"><!-- por compatibilidad si tu router lo usa -->
+              <input type="hidden" name="Pages" value="Users">
               <input type="text" class="form-control" name="q" placeholder="Nombre o correo" value="<?php echo htmlspecialchars($q); ?>">
             </div>
             <div class="form-group" style="margin-left:8px;">
