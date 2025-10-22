@@ -1,0 +1,620 @@
+<?php
+if (session_status() !== PHP_SESSION_ACTIVE) { session_start(); }
+require_once "Config/Database.php";
+
+/* ========= ACCESO =========
+   Operaciones / Logística / Admin / Gerencia */
+$areas = array_map('strtolower', $_SESSION['areas'] ?? []);
+$rol   = $_SESSION['user']['rol'] ?? '';
+$allow = in_array('operaciones', $areas, true) || in_array('logistica', $areas, true)
+         || in_array($rol, ['Admin','Gerencia'], true);
+
+if (!$allow) {
+?>
+<section class="content-header"><h1>Inventario <small>Acceso restringido</small></h1></section>
+<section class="content"><div class="callout callout-danger"><h4>No autorizado</h4><p>Sección exclusiva para <b>Operaciones/Logística</b> o <b>Admin/Gerencia</b>.</p></div></section>
+<?php
+  return;
+}
+
+/* ========= UTILS ========= */
+function h($s){ return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
+function flash_set($type,$msg,$k='flash'){ $_SESSION[$k] = '<div class="alert alert-'.$type.'">'.$msg.'</div>'; }
+function flash_show($k='flash'){ if(!empty($_SESSION[$k])){ echo $_SESSION[$k]; unset($_SESSION[$k]); } }
+function csrf_token(){ if(empty($_SESSION['csrf'])) $_SESSION['csrf']=bin2hex(random_bytes(16)); return $_SESSION['csrf']; }
+function csrf_ok($t){ return isset($_SESSION['csrf']) && hash_equals($_SESSION['csrf'], $t ?? ''); }
+
+$csrf = csrf_token();
+$pdo  = Database::getConnection();
+
+/* ========= ENDPOINTS AJAX ========= */
+/* 1) Stocks en tiempo real */
+if (($_GET['ajax'] ?? '') === 'stocks') {
+  header('Content-Type: application/json; charset=utf-8');
+  $q   = trim($_GET['q'] ?? '');
+  $cat = trim($_GET['categoria'] ?? '');
+  $est = trim($_GET['estado'] ?? '');
+
+  $where = "1=1";
+  $args  = [];
+  if ($q !== '') {
+    $where .= " AND (b.nombre LIKE ? OR b.codigo LIKE ? OR b.descripcion LIKE ?)";
+    $like = "%$q%"; array_push($args,$like,$like,$like);
+  }
+  if ($cat !== '') { $where .= " AND IFNULL(b.categoria,'') = ?"; $args[] = $cat; }
+  if ($est !== '') { $where .= " AND b.estado = ?"; $args[] = $est; }
+
+  $st = $pdo->prepare("SELECT b.id, b.cantidad_total FROM inventario_bienes b WHERE $where ORDER BY b.id DESC LIMIT 1000");
+  $st->execute($args);
+  echo json_encode($st->fetchAll(PDO::FETCH_ASSOC));
+  exit;
+}
+
+/* 2) Historial por bien (para modal) */
+if (($_GET['ajax'] ?? '') === 'movs' && !empty($_GET['bien'])) {
+  header('Content-Type: application/json; charset=utf-8');
+  $bien = (int)$_GET['bien'];
+  $st = $pdo->prepare("
+    SELECT id, DATE_FORMAT(fecha,'%Y-%m-%d %H:%i') as fecha, tipo, cantidad, motivo, referencia, expediente_id
+    FROM inventario_movimientos
+    WHERE bien_id = ?
+    ORDER BY fecha DESC
+    LIMIT 100
+  ");
+  $st->execute([$bien]);
+  echo json_encode($st->fetchAll(PDO::FETCH_ASSOC));
+  exit;
+}
+
+/* ========= CARGA SOPORTE ========= */
+/* Últimos expedientes para asociar (select opcional) */
+$expedientes = $pdo->query("
+  SELECT id, CONCAT('#',id,' - ',programa,' (',IFNULL(tour,''),')') AS nom
+  FROM expedientes
+  ORDER BY id DESC
+  LIMIT 200
+")->fetchAll(PDO::FETCH_ASSOC);
+
+/* ========= ACCIONES ========= */
+try {
+  if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!csrf_ok($_POST['csrf'] ?? '')) { throw new Exception('CSRF inválido.'); }
+    $action = $_POST['action'] ?? '';
+
+    /* Crear/Editar Bien */
+    if ($action === 'create' || $action === 'update') {
+      $id          = (int)($_POST['id'] ?? 0);
+      $codigo      = trim($_POST['codigo'] ?? '');
+      $nombre      = trim($_POST['nombre'] ?? '');
+      $categoria   = trim($_POST['categoria'] ?? '');
+      $descripcion = trim($_POST['descripcion'] ?? '');
+      $unidad      = trim($_POST['unidad'] ?? 'unidad');
+      $cantidad    = (int)($_POST['cantidad_total'] ?? 0);
+      $ubicacion   = trim($_POST['ubicacion'] ?? '');
+      $estado      = $_POST['estado'] ?? 'activo';
+
+      if ($nombre === '') throw new Exception('El nombre del bien es obligatorio.');
+      if ($cantidad < 0) $cantidad = 0;
+      if (!in_array($estado, ['activo','inactivo'], true)) $estado = 'activo';
+
+      if ($action === 'create') {
+        $st = $pdo->prepare("
+          INSERT INTO inventario_bienes
+            (codigo, nombre, categoria, descripcion, unidad, cantidad_total, ubicacion, estado)
+          VALUES (?,?,?,?,?,?,?,?)
+        ");
+        $st->execute([
+          $codigo!==''?$codigo:null,
+          $nombre,
+          $categoria!==''?$categoria:null,
+          $descripcion!==''?$descripcion:null,
+          $unidad!==''?$unidad:'unidad',
+          $cantidad,
+          $ubicacion!==''?$ubicacion:null,
+          $estado
+        ]);
+        flash_set('success','Bien creado correctamente.');
+      } else {
+        if ($id <= 0) throw new Exception('ID inválido.');
+        $st = $pdo->prepare("
+          UPDATE inventario_bienes
+             SET codigo=?, nombre=?, categoria=?, descripcion=?, unidad=?, cantidad_total=?, ubicacion=?, estado=?
+           WHERE id=?
+        ");
+        $st->execute([
+          $codigo!==''?$codigo:null,
+          $nombre,
+          $categoria!==''?$categoria:null,
+          $descripcion!==''?$descripcion:null,
+          $unidad!==''?$unidad:'unidad',
+          $cantidad,
+          $ubicacion!==''?$ubicacion:null,
+          $estado,
+          $id
+        ]);
+        flash_set('success','Bien actualizado.');
+      }
+      header("Location: InventarioBienes"); exit;
+    }
+
+    /* Eliminar Bien */
+    if ($action === 'delete') {
+      $id = (int)($_POST['id'] ?? 0);
+      if ($id <= 0) throw new Exception('ID inválido.');
+      // Ojo: inventario_movimientos.bien_id tiene ON DELETE RESTRICT (no se definió),
+      // si deseas evitar eliminar con movimientos, se bloqueará por FK si la definiste RESTRICT.
+      $pdo->prepare("DELETE FROM inventario_bienes WHERE id=?")->execute([$id]);
+      flash_set('success','Bien eliminado.');
+      header("Location: InventarioBienes"); exit;
+    }
+
+    /* Registrar Movimiento */
+    if ($action === 'mov') {
+      $bien_id     = (int)($_POST['bien_id'] ?? 0);
+      $tipo        = $_POST['tipo'] ?? 'entrada'; // entrada/salida/ajuste
+      $cantidad    = (int)($_POST['cantidad'] ?? 0);
+      $nuevo_stock = isset($_POST['nuevo_stock']) ? (int)$_POST['nuevo_stock'] : null; // para ajuste
+      $motivo      = trim($_POST['motivo'] ?? '');
+      $referencia  = trim($_POST['referencia'] ?? '');
+      $expediente  = (int)($_POST['expediente_id'] ?? 0);
+
+      if ($bien_id <= 0)  throw new Exception('Seleccione un bien.');
+      if (!in_array($tipo, ['entrada','salida','ajuste'], true)) throw new Exception('Tipo inválido.');
+
+      // Leer stock actual
+      $st = $pdo->prepare("SELECT cantidad_total FROM inventario_bienes WHERE id=? LIMIT 1");
+      $st->execute([$bien_id]);
+      $cur = (int)($st->fetchColumn());
+      if ($st->rowCount() === 0) throw new Exception('Bien no encontrado.');
+
+      $userId = (int)($_SESSION['user']['id'] ?? 0);
+      $pdo->beginTransaction();
+
+      if ($tipo === 'entrada') {
+        if ($cantidad <= 0) throw new Exception('Cantidad > 0.');
+        $nuevo = $cur + $cantidad;
+
+        $pdo->prepare("
+          INSERT INTO inventario_movimientos (bien_id, fecha, tipo, cantidad, motivo, referencia, expediente_id, creado_por)
+          VALUES (?, NOW(), 'entrada', ?, ?, ?, ?, ?)
+        ")->execute([$bien_id, $cantidad, $motivo!==''?$motivo:null, $referencia!==''?$referencia:null, $expediente?:null, $userId?:null]);
+
+        $pdo->prepare("UPDATE inventario_bienes SET cantidad_total=? WHERE id=?")->execute([$nuevo, $bien_id]);
+
+      } elseif ($tipo === 'salida') {
+        if ($cantidad <= 0) throw new Exception('Cantidad > 0.');
+        if ($cantidad > $cur) throw new Exception('Stock insuficiente.');
+        $nuevo = $cur - $cantidad;
+
+        $pdo->prepare("
+          INSERT INTO inventario_movimientos (bien_id, fecha, tipo, cantidad, motivo, referencia, expediente_id, creado_por)
+          VALUES (?, NOW(), 'salida', ?, ?, ?, ?, ?)
+        ")->execute([$bien_id, $cantidad, $motivo!==''?$motivo:null, $referencia!==''?$referencia:null, $expediente?:null, $userId?:null]);
+
+        $pdo->prepare("UPDATE inventario_bienes SET cantidad_total=? WHERE id=?")->execute([$nuevo, $bien_id]);
+
+      } else { // ajuste
+        if ($nuevo_stock === null || $nuevo_stock < 0) throw new Exception('Stock final inválido.');
+        $delta = $nuevo_stock - $cur; // positivo o negativo
+        $pdo->prepare("
+          INSERT INTO inventario_movimientos (bien_id, fecha, tipo, cantidad, motivo, referencia, expediente_id, creado_por)
+          VALUES (?, NOW(), 'ajuste', ?, ?, ?, ?, ?)
+        ")->execute([$bien_id, abs($delta), $motivo!==''?$motivo:null, $referencia!==''?$referencia:null, $expediente?:null, $userId?:null]);
+
+        $pdo->prepare("UPDATE inventario_bienes SET cantidad_total=? WHERE id=?")->execute([$nuevo_stock, $bien_id]);
+      }
+
+      $pdo->commit();
+      flash_set('success','Movimiento registrado correctamente.');
+      header("Location: InventarioBienes"); exit;
+    }
+
+  }
+} catch (Throwable $e) {
+  $code = ($e instanceof PDOException) ? $e->getCode() : '';
+  if ($code === '23000') {
+    flash_set('danger','Conflicto/relación existente. Revisa dependencias.');
+  } else {
+    flash_set('danger','Error: '.$e->getMessage());
+  }
+  header("Location: InventarioBienes"); exit;
+}
+
+/* ========= FILTROS LISTADO ========= */
+$q   = trim($_GET['q'] ?? '');
+$cat = trim($_GET['categoria'] ?? '');
+$est = trim($_GET['estado'] ?? '');
+
+$where = "1=1";
+$args  = [];
+if ($q !== '') {
+  $where .= " AND (b.nombre LIKE ? OR b.codigo LIKE ? OR b.descripcion LIKE ?)";
+  $like = "%$q%"; array_push($args,$like,$like,$like);
+}
+if ($cat !== '') { $where .= " AND IFNULL(b.categoria,'') = ?"; $args[] = $cat; }
+if ($est !== '') { $where .= " AND b.estado = ?"; $args[] = $est; }
+
+/* ========= LISTADO ========= */
+$rows = $pdo->prepare("
+  SELECT b.id, b.codigo, b.nombre, b.categoria, b.descripcion, b.unidad, b.cantidad_total,
+         b.ubicacion, b.estado, b.creado_en
+  FROM inventario_bienes b
+  WHERE $where
+  ORDER BY b.id DESC
+  LIMIT 500
+");
+$rows->execute($args);
+$bienes = $rows->fetchAll(PDO::FETCH_ASSOC);
+
+/* ========= CARGAR BIEN EN EDICIÓN ========= */
+$editId  = isset($_GET['edit']) ? (int)$_GET['edit'] : 0;
+$editRow = null;
+if ($editId > 0) {
+  $st = $pdo->prepare("SELECT * FROM inventario_bienes WHERE id=? LIMIT 1");
+  $st->execute([$editId]);
+  $editRow = $st->fetch(PDO::FETCH_ASSOC);
+}
+
+/* ========= CATEGORÍAS DINÁMICAS (para filtro/select) ========= */
+$cats = $pdo->query("SELECT DISTINCT IFNULL(categoria,'') AS cat FROM inventario_bienes ORDER BY cat")->fetchAll(PDO::FETCH_COLUMN);
+
+?>
+<section class="content-header">
+  <h1>Inventario de bienes <small>Stock con actualización en tiempo real</small></h1>
+  <ol class="breadcrumb">
+    <li><a href="Dashboard"><i class="fa fa-dashboard"></i> Home</a></li>
+    <li class="active">Inventario</li>
+  </ol>
+</section>
+
+<section class="content">
+  <?php flash_show(); ?>
+
+  <div class="row">
+    <!-- Form Crear/Editar Bien -->
+    <div class="col-md-5">
+      <div class="box box-primary">
+        <div class="box-header with-border">
+          <h3 class="box-title">
+            <i class="fa fa-cube"></i> <?php echo $editRow ? ('Editar bien #'.(int)$editRow['id']) : 'Nuevo bien'; ?>
+          </h3>
+          <?php if ($editRow): ?>
+            <div class="box-tools"><a class="btn btn-default btn-sm" href="InventarioBienes"><i class="fa fa-plus"></i> Nuevo</a></div>
+          <?php endif; ?>
+        </div>
+        <form method="post" action="InventarioBienes" autocomplete="off">
+          <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+          <input type="hidden" name="action" value="<?php echo $editRow ? 'update':'create'; ?>">
+          <?php if ($editRow): ?><input type="hidden" name="id" value="<?php echo (int)$editRow['id']; ?>"><?php endif; ?>
+
+          <div class="box-body">
+            <div class="row">
+              <div class="col-sm-4">
+                <div class="form-group">
+                  <label>Código</label>
+                  <input type="text" name="codigo" class="form-control" value="<?php echo h($editRow['codigo'] ?? ''); ?>">
+                </div>
+              </div>
+              <div class="col-sm-8">
+                <div class="form-group">
+                  <label>Nombre *</label>
+                  <input type="text" name="nombre" class="form-control" required value="<?php echo h($editRow['nombre'] ?? ''); ?>">
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col-sm-5">
+                <div class="form-group">
+                  <label>Categoría</label>
+                  <input type="text" name="categoria" class="form-control" list="cats" value="<?php echo h($editRow['categoria'] ?? ''); ?>">
+                  <datalist id="cats">
+                    <?php foreach ($cats as $c): if ($c==='') continue; ?>
+                      <option value="<?php echo h($c); ?>">
+                    <?php endforeach; ?>
+                  </datalist>
+                </div>
+              </div>
+              <div class="col-sm-3">
+                <div class="form-group">
+                  <label>Unidad</label>
+                  <input type="text" name="unidad" class="form-control" value="<?php echo h($editRow['unidad'] ?? 'unidad'); ?>">
+                </div>
+              </div>
+              <div class="col-sm-4">
+                <div class="form-group">
+                  <label>Stock inicial</label>
+                  <input type="number" min="0" name="cantidad_total" class="form-control" value="<?php echo isset($editRow['cantidad_total'])? (int)$editRow['cantidad_total'] : 0; ?>">
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Descripción</label>
+              <textarea name="descripcion" rows="2" class="form-control"><?php echo h($editRow['descripcion'] ?? ''); ?></textarea>
+            </div>
+            <div class="row">
+              <div class="col-sm-8">
+                <div class="form-group">
+                  <label>Ubicación</label>
+                  <input type="text" name="ubicacion" class="form-control" value="<?php echo h($editRow['ubicacion'] ?? ''); ?>">
+                </div>
+              </div>
+              <div class="col-sm-4">
+                <div class="form-group">
+                  <label>Estado</label>
+                  <select name="estado" class="form-control">
+                    <option value="activo"   <?php echo (($editRow['estado'] ?? '')==='activo')?'selected':''; ?>>Activo</option>
+                    <option value="inactivo" <?php echo (($editRow['estado'] ?? '')==='inactivo')?'selected':''; ?>>Inactivo</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="box-footer">
+            <?php if ($editRow): ?>
+              <a href="InventarioBienes" class="btn btn-default">Cancelar</a>
+              <button class="btn btn-primary"><i class="fa fa-save"></i> Guardar cambios</button>
+            <?php else: ?>
+              <button class="btn btn-success"><i class="fa fa-plus"></i> Crear bien</button>
+            <?php endif; ?>
+          </div>
+        </form>
+      </div>
+
+      <!-- Movimiento rápido -->
+      <div class="box box-success">
+        <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-exchange"></i> Movimiento rápido</h3></div>
+        <form method="post" action="InventarioBienes" onsubmit="return validarMov();" autocomplete="off" style="margin:0;">
+          <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+          <input type="hidden" name="action" value="mov">
+          <div class="box-body">
+            <div class="form-group">
+              <label>Bien</label>
+              <select name="bien_id" id="mov_bien" class="form-control" required>
+                <option value="">-- Seleccione --</option>
+                <?php foreach ($bienes as $b): ?>
+                  <option value="<?php echo (int)$b['id']; ?>">
+                    <?php echo '#'.$b['id'].' - '.h($b['nombre']).' (Stock: '.$b['cantidad_total'].' '.$b['unidad'].')'; ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+
+            <div class="row">
+              <div class="col-sm-4">
+                <div class="form-group">
+                  <label>Tipo</label>
+                  <select name="tipo" id="mov_tipo" class="form-control" onchange="toggleAjuste();">
+                    <option value="entrada">Entrada</option>
+                    <option value="salida">Salida</option>
+                    <option value="ajuste">Ajuste</option>
+                  </select>
+                </div>
+              </div>
+              <div class="col-sm-4" id="grp_cantidad">
+                <div class="form-group">
+                  <label>Cantidad</label>
+                  <input type="number" min="1" name="cantidad" id="mov_cantidad" class="form-control" value="1">
+                </div>
+              </div>
+              <div class="col-sm-4" id="grp_nuevo" style="display:none;">
+                <div class="form-group">
+                  <label>Nuevo stock</label>
+                  <input type="number" min="0" name="nuevo_stock" id="mov_nuevo_stock" class="form-control" value="0">
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Expediente (opcional)</label>
+              <select name="expediente_id" class="form-control">
+                <option value="">-- Ninguno --</option>
+                <?php foreach ($expedientes as $e): ?>
+                  <option value="<?php echo (int)$e['id']; ?>"><?php echo h($e['nom']); ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+
+            <div class="row">
+              <div class="col-sm-6">
+                <div class="form-group">
+                  <label>Motivo</label>
+                  <input type="text" name="motivo" class="form-control" placeholder="Compra, consumo, ajuste...">
+                </div>
+              </div>
+              <div class="col-sm-6">
+                <div class="form-group">
+                  <label>Referencia</label>
+                  <input type="text" name="referencia" class="form-control" placeholder="OC-123, guía, etc.">
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="box-footer">
+            <button class="btn btn-success"><i class="fa fa-check"></i> Registrar movimiento</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Listado Bienes -->
+    <div class="col-md-7">
+      <div class="box box-default">
+        <div class="box-header with-border">
+          <h3 class="box-title"><i class="fa fa-filter"></i> Filtros</h3>
+          <div class="box-tools">
+            <?php if ($editRow): ?>
+              <form method="post" action="InventarioBienes" style="display:inline;" onsubmit="return confirm('¿Eliminar este bien?');">
+                <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="id" value="<?php echo (int)$editRow['id']; ?>">
+                <button class="btn btn-danger btn-sm"><i class="fa fa-trash"></i> Eliminar bien</button>
+              </form>
+            <?php endif; ?>
+          </div>
+        </div>
+        <div class="box-body">
+          <form class="form-inline" method="get" action="InventarioBienes" style="margin:0;">
+            <input type="text" name="q" class="form-control" placeholder="Buscar código/nombre/desc." style="min-width:260px;" value="<?php echo h($q); ?>">
+            <select name="categoria" class="form-control">
+              <option value="">-- Categoría --</option>
+              <?php foreach ($cats as $c): ?>
+                <option value="<?php echo h($c); ?>" <?php echo ($cat===$c)?'selected':''; ?>><?php echo $c===''? '(sin categoría)' : h($c); ?></option>
+              <?php endforeach; ?>
+            </select>
+            <select name="estado" class="form-control">
+              <option value="">-- Estado --</option>
+              <option value="activo"   <?php echo ($est==='activo')?'selected':''; ?>>Activo</option>
+              <option value="inactivo" <?php echo ($est==='inactivo')?'selected':''; ?>>Inactivo</option>
+            </select>
+            <button class="btn btn-default"><i class="fa fa-search"></i> Aplicar</button>
+            <?php if (!empty($_GET)): ?><a class="btn btn-default" href="InventarioBienes"><i class="fa fa-times"></i> Limpiar</a><?php endif; ?>
+          </form>
+        </div>
+      </div>
+
+      <div class="box box-info">
+        <div class="box-header with-border">
+          <h3 class="box-title"><i class="fa fa-table"></i> Bienes (últimos 500)</h3>
+        </div>
+        <div class="box-body table-responsive no-padding">
+          <table class="table table-hover" id="tbl_bienes">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Código</th>
+                <th>Nombre</th>
+                <th>Categoría</th>
+                <th>Ubicación</th>
+                <th class="text-right">Stock</th>
+                <th>Unidad</th>
+                <th>Estado</th>
+                <th style="min-width:160px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php if (empty($bienes)): ?>
+                <tr><td colspan="9" class="text-center text-muted">Sin registros</td></tr>
+              <?php else: foreach ($bienes as $r): ?>
+                <tr>
+                  <td><?php echo (int)$r['id']; ?></td>
+                  <td><?php echo h($r['codigo'] ?? ''); ?></td>
+                  <td><strong><?php echo h($r['nombre']); ?></strong></td>
+                  <td><?php echo h($r['categoria'] ?? ''); ?></td>
+                  <td><?php echo h($r['ubicacion'] ?? ''); ?></td>
+                  <td class="text-right"><span class="label label-default" data-stock="<?php echo (int)$r['id']; ?>"><?php echo (int)$r['cantidad_total']; ?></span></td>
+                  <td><?php echo h($r['unidad']); ?></td>
+                  <td>
+                    <?php if (($r['estado'] ?? '')==='activo'): ?>
+                      <span class="label label-success">Activo</span>
+                    <?php else: ?>
+                      <span class="label label-default">Inactivo</span>
+                    <?php endif; ?>
+                  </td>
+                  <td>
+                    <a class="btn btn-xs btn-warning" href="InventarioBienes?edit=<?php echo (int)$r['id']; ?>"><i class="fa fa-pencil"></i> Editar</a>
+                    <button class="btn btn-xs btn-info" onclick="verMovs(<?php echo (int)$r['id']; ?>)"><i class="fa fa-history"></i> Movs</button>
+                  </td>
+                </tr>
+              <?php endforeach; endif; ?>
+            </tbody>
+          </table>
+        </div>
+        <div class="box-footer">
+          <small class="text-muted">Actualización automática del stock cada 10 segundos.</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Historial -->
+  <div class="modal fade" id="modalMovs" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span>&times;</span></button>
+          <h4 class="modal-title"><i class="fa fa-history"></i> Historial de movimientos</h4>
+        </div>
+        <div class="modal-body">
+          <div class="table-responsive">
+            <table class="table table-striped">
+              <thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Motivo</th><th>Referencia</th><th>Expediente</th></tr></thead>
+              <tbody id="movsBody"><tr><td colspan="6" class="text-center text-muted">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-default" data-dismiss="modal">Cerrar</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+function toggleAjuste(){
+  var tipo = document.getElementById('mov_tipo').value;
+  document.getElementById('grp_cantidad').style.display = (tipo === 'ajuste') ? 'none':'block';
+  document.getElementById('grp_nuevo').style.display   = (tipo === 'ajuste') ? 'block':'none';
+}
+function validarMov(){
+  var tipo = document.getElementById('mov_tipo').value;
+  if (tipo === 'ajuste') {
+    var nv = document.getElementById('mov_nuevo_stock').value;
+    if (nv === '' || parseInt(nv) < 0) { alert('Indique el nuevo stock (>=0).'); return false; }
+  } else {
+    var c = document.getElementById('mov_cantidad').value;
+    if (c === '' || parseInt(c) <= 0) { alert('Cantidad debe ser > 0.'); return false; }
+  }
+  return true;
+}
+function verMovs(bienId){
+  document.getElementById('movsBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted">Cargando…</td></tr>';
+  $('#modalMovs').modal('show');
+  fetch('InventarioBienes?ajax=movs&bien='+bienId, {cache:'no-store'})
+    .then(r=>r.json())
+    .then(rows=>{
+      if (!rows || rows.length===0) { document.getElementById('movsBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted">Sin movimientos</td></tr>'; return; }
+      var html='';
+      rows.forEach(function(m){
+        html += '<tr>'
+              + '<td><small>'+escapeHtml(m.fecha||"")+'</small></td>'
+              + '<td>'+badgeTipo(m.tipo)+'</td>'
+              + '<td>'+parseInt(m.cantidad||0)+'</td>'
+              + '<td>'+escapeHtml(m.motivo||"")+'</td>'
+              + '<td>'+escapeHtml(m.referencia||"")+'</td>'
+              + '<td>'+(m.expediente_id?('#'+m.expediente_id):'')+'</td>'
+              + '</tr>';
+      });
+      document.getElementById('movsBody').innerHTML = html;
+    })
+    .catch(()=>{ document.getElementById('movsBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted">Error al cargar</td></tr>'; });
+}
+function badgeTipo(t){
+  var cls='label-default', txt=t||'';
+  if (t==='entrada') cls='label-success';
+  else if (t==='salida') cls='label-danger';
+  else if (t==='ajuste') cls='label-warning';
+  return '<span class="label '+cls+'">'+txt+'</span>';
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]); }); }
+
+/* === Actualización en tiempo real: refrescar stock cada 10s === */
+var pollTimer = null;
+function pollStocks(){
+  var q   = '<?php echo h($q); ?>';
+  var cat = '<?php echo h($cat); ?>';
+  var est = '<?php echo h($est); ?>';
+  fetch('InventarioBienes?ajax=stocks&q='+encodeURIComponent(q)+'&categoria='+encodeURIComponent(cat)+'&estado='+encodeURIComponent(est), {cache:'no-store'})
+    .then(r=>r.json())
+    .then(data=>{
+      if (!Array.isArray(data)) return;
+      data.forEach(function(it){
+        var el = document.querySelector('[data-stock="'+it.id+'"]');
+        if (el) { el.textContent = it.cantidad_total; }
+      });
+    })
+    .catch(()=>{ /* silencioso */ });
+}
+document.addEventListener('DOMContentLoaded', function(){
+  pollStocks();
+  pollTimer = setInterval(pollStocks, 10000);
+});
+</script>
